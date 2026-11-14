@@ -1,7 +1,9 @@
 package com.smpn1tualang.cbtexam;
 
+import android.Manifest;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.WindowManager;
@@ -12,7 +14,9 @@ import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
 import com.bumptech.glide.Glide;
 import com.google.android.material.card.MaterialCardView;
@@ -32,40 +36,65 @@ public class MainActivity extends AppCompatActivity {
             }
     );
 
+    // Launcher untuk meminta izin Kamera di Android 6.0+
+    private final ActivityResultLauncher<String> requestCameraPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
+                if (isGranted) {
+                    mulaiScanQr();
+                } else {
+                    Toast.makeText(this, "Izin kamera diperlukan untuk scan QR Code!", Toast.LENGTH_LONG).show();
+                }
+            });
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Fullscreen portrait
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_main);
 
         ImageView imgLogo = findViewById(R.id.imgLogo);
-        Glide.with(this)
-                .load("https://smpn1tualang.sch.id/images/aplikasi/logo.png")
-                .placeholder(R.drawable.logo_sekolah)
-                .error(R.drawable.logo_sekolah)
-                .into(imgLogo);
+        try {
+            Glide.with(this)
+                    .load("https://smpn1tualang.sch.id/images/aplikasi/logo.png")
+                    .placeholder(android.R.drawable.sym_def_app_icon)
+                    .error(android.R.drawable.sym_def_app_icon)
+                    .into(imgLogo);
+        } catch (Exception ignored) {
+        }
 
         MaterialCardView btnScanQr = findViewById(R.id.btnScanQr);
         MaterialCardView btnInputLink = findViewById(R.id.btnInputLink);
         MaterialCardView btnBantuan = findViewById(R.id.btnBantuan);
 
-        // 1. Menu Scan QR Code Ujian
+        // 1. Menu Scan QR Code (Cek izin kamera dulu agar tidak crash)
         btnScanQr.setOnClickListener(v -> {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                    == PackageManager.PERMISSION_GRANTED) {
+                mulaiScanQr();
+            } else {
+                requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA);
+            }
+        });
+
+        // 2. Menu Masukkan Link Ujian
+        btnInputLink.setOnClickListener(v -> tampilkanDialogInputLink());
+
+        // 3. Menu Bantuan
+        btnBantuan.setOnClickListener(v -> tampilkanDialogBantuan());
+    }
+
+    private void mulaiScanQr() {
+        try {
             ScanOptions options = new ScanOptions();
             options.setPrompt("Arahkan kamera ke QR Code Ujian dari Guru Pengawas");
             options.setBeepEnabled(true);
             options.setOrientationLocked(true);
             options.setCaptureActivity(QrScannerActivity.class);
             qrLauncher.launch(options);
-        });
-
-        // 2. Menu Masukkan Link Ujian (Hapus history ketikan / tanpa autofill)
-        btnInputLink.setOnClickListener(v -> tampilkanDialogInputLink());
-
-        // 3. Menu Bantuan
-        btnBantuan.setOnClickListener(v -> tampilkanDialogBantuan());
+        } catch (Exception e) {
+            Toast.makeText(this, "Gagal membuka kamera: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void tampilkanDialogInputLink() {
@@ -78,20 +107,19 @@ public class MainActivity extends AppCompatActivity {
 
         final EditText inputUrl = new EditText(this);
         inputUrl.setHint("https://...");
-        // Nonaktifkan riwayat ketikan, saran keyboard, dan autofill
         inputUrl.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_VARIATION_URI
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         inputUrl.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
         inputUrl.setSaveEnabled(false);
-        inputUrl.setText(""); // Pastikan selalu kosong saat dibuka
+        inputUrl.setText("");
 
         layout.addView(inputUrl);
         builder.setView(layout);
 
         builder.setPositiveButton("MASUK UJIAN", (dialog, which) -> {
             String url = inputUrl.getText().toString().trim();
-            inputUrl.setText(""); // Hapus ketikan segera setelah disubmit
+            inputUrl.setText("");
             if (!url.isEmpty()) {
                 if (!url.startsWith("http://") && !url.startsWith("https://")) {
                     url = "https://" + url;
@@ -111,7 +139,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void tampilkanDialogBantuan() {
-        String infoPembuat = "CBT EXAM BROWSER dibuat untuk tujuan mempermudah dalam melaksanakan sistem ujian yang transparan dan jujur.\n\n" +
+        String infoPembuat = "CBT EXAM BROWSER Dibuat Untuk Mempermudah Pelaksanaan Sistem Ujian yang Transparan dan Jujur.\n\n" +
                 "Aplikasi ini dibuat oleh :\n" +
                 "TRI SUTRISNO, S.Kom\n" +
                 "Guru SMP Negeri 1 Tualang\n" +
@@ -120,7 +148,6 @@ public class MainActivity extends AppCompatActivity {
 
         new AlertDialog.Builder(this)
                 .setTitle("Tentang Aplikasi & Bantuan")
-                .setIcon(R.drawable.logo_sekolah)
                 .setMessage(infoPembuat)
                 .setPositiveButton("TUTUP", null)
                 .show();
