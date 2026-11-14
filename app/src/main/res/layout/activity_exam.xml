@@ -74,14 +74,13 @@
                 android:text="|"
                 android:textColor="#60FFFFFF" />
 
-            <!-- 3. Logo Indikator Jaringan (Hijau = Online, Merah = Offline) -->
+            <!-- 3. Logo Indikator Jaringan Vektor -->
             <ImageView
                 android:id="@+id/iconNetwork"
-                android:layout_width="18dp"
-                android:layout_height="18dp"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
                 android:contentDescription="Status Jaringan"
-                android:src="@android:drawable/presence_online"
-                app:tint="#69F0AE" />
+                android:src="@drawable/ic_network_online" />
         </LinearLayout>
 
         <!-- Kanan: Tombol Refresh & Keluar -->
@@ -162,6 +161,38 @@
             app:backgroundTint="@color/primary"
             app:fabSize="mini"
             app:tint="@color/white" />
+    </LinearLayout>
+
+    <!-- Layar Pemblokir Jika Terdeteksi Floating App / Split Screen -->
+    <LinearLayout
+        android:id="@+id/overlayBlocker"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#EEB71C1C"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="PELANGGARAN TERDETEKSI!"
+            android:textColor="@color/white"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:text="Dilarang membuka aplikasi mengambang (Floating App), Split Screen, atau menarik panel notifikasi saat ujian berlangsung!"
+            android:textColor="@color/white"
+            android:textSize="15sp" />
     </LinearLayout>
 
 </RelativeLayout>
