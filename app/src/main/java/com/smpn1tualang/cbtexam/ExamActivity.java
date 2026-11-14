@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
@@ -27,11 +28,13 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.widget.ImageViewCompat;
 
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
@@ -39,7 +42,8 @@ public class ExamActivity extends AppCompatActivity {
 
     private WebView webView;
     private ProgressBar progressBar;
-    private TextView txtBattery, txtNetwork;
+    private TextView txtBattery;
+    private ImageView iconBattery, iconNetwork;
     private ToneGenerator toneGen;
     private boolean isAuthorizedExit = false;
     private boolean isDialogShowing = false;
@@ -55,7 +59,12 @@ public class ExamActivity extends AppCompatActivity {
                 int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
                 if (level >= 0 && scale > 0) {
                     int batteryPct = (int) ((level / (float) scale) * 100);
-                    txtBattery.setText("BAT: " + batteryPct + "%");
+                    txtBattery.setText(batteryPct + "%");
+                    if (batteryPct <= 20) {
+                        ImageViewCompat.setImageTintList(iconBattery, ColorStateList.valueOf(Color.parseColor("#FF5252")));
+                    } else {
+                        ImageViewCompat.setImageTintList(iconBattery, ColorStateList.valueOf(Color.parseColor("#A5D6A7")));
+                    }
                 }
             } else if (ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
                 updateNetworkStatus();
@@ -76,7 +85,6 @@ public class ExamActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_exam);
 
-        // Inisialisasi ToneGenerator secara aman (mencegah crash native memory)
         try {
             toneGen = new ToneGenerator(AudioManager.STREAM_MUSIC, 100);
         } catch (Exception ignored) {
@@ -88,7 +96,8 @@ public class ExamActivity extends AppCompatActivity {
         webView = findViewById(R.id.webViewExam);
         progressBar = findViewById(R.id.progressBar);
         txtBattery = findViewById(R.id.txtBattery);
-        txtNetwork = findViewById(R.id.txtNetwork);
+        iconBattery = findViewById(R.id.iconBattery);
+        iconNetwork = findViewById(R.id.iconNetwork);
         ImageButton btnRefresh = findViewById(R.id.btnRefresh);
         Button btnExit = findViewById(R.id.btnExit);
         FloatingActionButton btnZoomIn = findViewById(R.id.btnZoomIn);
@@ -182,7 +191,6 @@ public class ExamActivity extends AppCompatActivity {
     }
 
     private void maksimalkanVolume() {
-        // Hanya naikkan STREAM_MUSIC & STREAM_ALARM agar tidak crash karena izin Do Not Disturb (STREAM_RING)
         try {
             AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
             if (audioManager != null) {
@@ -253,11 +261,11 @@ public class ExamActivity extends AppCompatActivity {
             boolean isConnected = activeNetwork != null && activeNetwork.isConnectedOrConnecting();
 
             if (isConnected) {
-                txtNetwork.setText("NET: ONLINE");
-                txtNetwork.setTextColor(Color.parseColor("#A5D6A7"));
+                iconNetwork.setImageResource(android.R.drawable.presence_online);
+                ImageViewCompat.setImageTintList(iconNetwork, ColorStateList.valueOf(Color.parseColor("#69F0AE")));
             } else {
-                txtNetwork.setText("NET: OFFLINE");
-                txtNetwork.setTextColor(Color.parseColor("#FFCDD2"));
+                iconNetwork.setImageResource(android.R.drawable.presence_offline);
+                ImageViewCompat.setImageTintList(iconNetwork, ColorStateList.valueOf(Color.parseColor("#FF5252")));
             }
         } catch (Exception ignored) {
         }
@@ -282,7 +290,6 @@ public class ExamActivity extends AppCompatActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        // Abaikan jika kehilangan fokus karena dialog password sendiri yang sedang terbuka
         if (!hasFocus && !isAuthorizedExit && !isDialogShowing) {
             bunyikanAlarmPeringatan();
             try {
@@ -324,7 +331,6 @@ public class ExamActivity extends AppCompatActivity {
         } catch (Exception ignored) {
         }
 
-        // Tarik kembali aplikasi dengan jeda aman (tidak memicu infinite loop)
         if (!isAuthorizedExit && !isDialogShowing) {
             bunyikanAlarmPeringatan();
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
