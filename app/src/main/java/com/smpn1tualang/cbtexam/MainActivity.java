@@ -25,6 +25,8 @@ import com.journeyapps.barcodescanner.ScanOptions;
 
 public class MainActivity extends AppCompatActivity {
 
+    private int pendingAction = 0; // 1 = Scan QR, 2 = Input Link
+
     private final ActivityResultLauncher<ScanOptions> qrLauncher = registerForActivityResult(
             new ScanContract(),
             result -> {
@@ -36,13 +38,16 @@ public class MainActivity extends AppCompatActivity {
             }
     );
 
-    // Launcher untuk meminta izin Kamera di Android 6.0+
     private final ActivityResultLauncher<String> requestCameraPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
                 if (isGranted) {
-                    mulaiScanQr();
+                    if (pendingAction == 1) {
+                        mulaiScanQr();
+                    } else if (pendingAction == 2) {
+                        tampilkanDialogInputLink();
+                    }
                 } else {
-                    Toast.makeText(this, "Izin kamera diperlukan untuk scan QR Code!", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Izin kamera wajib diaktifkan untuk pengawasan ujian!", Toast.LENGTH_LONG).show();
                 }
             });
 
@@ -67,8 +72,9 @@ public class MainActivity extends AppCompatActivity {
         MaterialCardView btnInputLink = findViewById(R.id.btnInputLink);
         MaterialCardView btnBantuan = findViewById(R.id.btnBantuan);
 
-        // 1. Menu Scan QR Code (Cek izin kamera dulu agar tidak crash)
+        // 1. Menu Scan QR Code
         btnScanQr.setOnClickListener(v -> {
+            pendingAction = 1;
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                     == PackageManager.PERMISSION_GRANTED) {
                 mulaiScanQr();
@@ -77,8 +83,16 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 2. Menu Masukkan Link Ujian
-        btnInputLink.setOnClickListener(v -> tampilkanDialogInputLink());
+        // 2. Menu Masukkan Link Ujian (Juga pastikan izin kamera aktif)
+        btnInputLink.setOnClickListener(v -> {
+            pendingAction = 2;
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                    == PackageManager.PERMISSION_GRANTED) {
+                tampilkanDialogInputLink();
+            } else {
+                requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA);
+            }
+        });
 
         // 3. Menu Bantuan
         btnBantuan.setOnClickListener(v -> tampilkanDialogBantuan());
@@ -139,7 +153,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void tampilkanDialogBantuan() {
-        String infoPembuat = "CBT EXAM BROWSER Dibuat Untuk Mempermudah Pelaksanaan Sistem Ujian yang Transparan dan Jujur.\n\n" +
+        String infoPembuat = "CBT EXAM BROWSER Dibuat Untuk Mempermudah Pelaksanakan Sistem Ujian Yang Transparan dan Jujur.\n\n" +
                 "Aplikasi ini dibuat oleh :\n" +
                 "TRI SUTRISNO, S.Kom\n" +
                 "Guru SMP Negeri 1 Tualang\n" +
