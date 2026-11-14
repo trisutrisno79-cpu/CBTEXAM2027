@@ -33,6 +33,7 @@
             android:exported="false"
             android:launchMode="singleTask"
             android:resizeableActivity="false"
+            android:supportsPictureInPicture="false"
             android:screenOrientation="portrait" />
 
         <!-- Scanner QR Code Portrait -->
