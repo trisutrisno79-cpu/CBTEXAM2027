@@ -14,6 +14,8 @@ import android.net.NetworkInfo;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.view.KeyEvent;
 import android.view.View;
@@ -38,19 +40,23 @@ public class ExamActivity extends AppCompatActivity {
     private WebView webView;
     private ProgressBar progressBar;
     private TextView txtBattery, txtNetwork;
+    private ToneGenerator toneGen;
     private boolean isAuthorizedExit = false;
+    private boolean isDialogShowing = false;
     private int currentZoom = 100;
 
-    // Receiver untuk memantau persentase Baterai dan status Jaringan secara realtime
     private final BroadcastReceiver systemStatusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (intent == null || intent.getAction() == null) return;
             String action = intent.getAction();
             if (Intent.ACTION_BATTERY_CHANGED.equals(action)) {
                 int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
                 int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
-                int batteryPct = (int) ((level / (float) scale) * 100);
-                txtBattery.setText("BAT: " + batteryPct + "%");
+                if (level >= 0 && scale > 0) {
+                    int batteryPct = (int) ((level / (float) scale) * 100);
+                    txtBattery.setText("BAT: " + batteryPct + "%");
+                }
             } else if (ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
                 updateNetworkStatus();
             }
@@ -61,7 +67,7 @@ public class ExamActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 1. ANTI SCREENSHOT & ANTI REKAM LAYAR + FULLSCREEN
+        // Anti Screenshot, Anti Rekam Layar, Fullscreen & Layar Tetap Menyala
         getWindow().setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE | WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_SECURE | WindowManager.LayoutParams.FLAG_FULLSCREEN
@@ -70,10 +76,15 @@ public class ExamActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_exam);
 
-        // 2. FULL-KAN VOLUME SUARA HP
+        // Inisialisasi ToneGenerator secara aman (mencegah crash native memory)
+        try {
+            toneGen = new ToneGenerator(AudioManager.STREAM_MUSIC, 100);
+        } catch (Exception ignored) {
+            toneGen = null;
+        }
+
         maksimalkanVolume();
 
-        // Inisialisasi UI
         webView = findViewById(R.id.webViewExam);
         progressBar = findViewById(R.id.progressBar);
         txtBattery = findViewById(R.id.txtBattery);
@@ -83,40 +94,37 @@ public class ExamActivity extends AppCompatActivity {
         FloatingActionButton btnZoomIn = findViewById(R.id.btnZoomIn);
         FloatingActionButton btnZoomOut = findViewById(R.id.btnZoomOut);
 
-        // Setup WebView & User-Agent
         konfigurasiWebView();
+        updateNetworkStatus();
 
         String examUrl = getIntent().getStringExtra("EXAM_URL");
-        if (examUrl != null) {
+        if (examUrl != null && !examUrl.isEmpty()) {
             webView.loadUrl(examUrl);
         }
 
-        // Tombol Refresh
-        btnRefresh.setOnClickListener(v -> webView.reload());
+        btnRefresh.setOnClickListener(v -> {
+            if (webView != null) webView.reload();
+        });
 
-        // Tombol Keluar (Bunyikan suara & minta password: xyz)
         btnExit.setOnClickListener(v -> {
-            maksimalkanVolume();
             bunyikanAlarmPeringatan();
             tampilkanDialogKeluar();
         });
 
-        // Tombol Zoom In & Zoom Out
         btnZoomIn.setOnClickListener(v -> {
-            if (currentZoom < 200) {
+            if (currentZoom < 200 && webView != null) {
                 currentZoom += 10;
                 webView.getSettings().setTextZoom(currentZoom);
             }
         });
 
         btnZoomOut.setOnClickListener(v -> {
-            if (currentZoom > 60) {
+            if (currentZoom > 60 && webView != null) {
                 currentZoom -= 10;
                 webView.getSettings().setTextZoom(currentZoom);
             }
         });
 
-        // Aktifkan Mode Kiosk / Pinning (Anti Floating & Anti Keluar)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             try {
                 startLockTask();
@@ -129,14 +137,21 @@ public class ExamActivity extends AppCompatActivity {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
         settings.setSupportZoom(true);
         settings.setBuiltInZoomControls(true);
-        settings.setDisplayZoomControls(false); // Sembunyikan tombol zoom bawaan, pakai tombol custom
+        settings.setDisplayZoomControls(false);
+        settings.setLoadWithOverviewMode(true);
+        settings.setUseWideViewPort(true);
 
-        // AKTIFKAN USER-AGENT KHUSUS: 10403445@
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        }
+
+        // User-Agent khusus sesuai permintaan
         settings.setUserAgentString("10403445@");
 
-        // ANTI COPY-PASTE (Blokir seleksi teks & klik tahan)
+        // Anti Copy-Paste
         webView.setLongClickable(false);
         webView.setOnLongClickListener(v -> true);
         webView.setHapticFeedbackEnabled(false);
@@ -145,13 +160,15 @@ public class ExamActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                // Injeksi CSS & JS tambahan untuk memastikan teks tidak bisa di-blok/copy
-                view.evaluateJavascript(
-                        "document.documentElement.style.webkitUserSelect='none';" +
-                        "document.documentElement.style.userSelect='none';" +
-                        "document.addEventListener('copy', function(e){ e.preventDefault(); });",
-                        null
-                );
+                try {
+                    view.evaluateJavascript(
+                            "document.documentElement.style.webkitUserSelect='none';" +
+                            "document.documentElement.style.userSelect='none';" +
+                            "document.addEventListener('copy', function(e){ e.preventDefault(); });",
+                            null
+                    );
+                } catch (Exception ignored) {
+                }
             }
         });
 
@@ -165,16 +182,14 @@ public class ExamActivity extends AppCompatActivity {
     }
 
     private void maksimalkanVolume() {
+        // Hanya naikkan STREAM_MUSIC & STREAM_ALARM agar tidak crash karena izin Do Not Disturb (STREAM_RING)
         try {
             AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
             if (audioManager != null) {
                 int maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
                 int maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM);
-                int maxRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING);
-
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0);
                 audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0);
-                audioManager.setStreamVolume(AudioManager.STREAM_RING, maxRing, 0);
             }
         } catch (Exception ignored) {
         }
@@ -183,13 +198,17 @@ public class ExamActivity extends AppCompatActivity {
     private void bunyikanAlarmPeringatan() {
         try {
             maksimalkanVolume();
-            ToneGenerator toneGen = new ToneGenerator(AudioManager.STREAM_ALARM, 100);
-            toneGen.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 1200);
+            if (toneGen != null) {
+                toneGen.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 1000);
+            }
         } catch (Exception ignored) {
         }
     }
 
     private void tampilkanDialogKeluar() {
+        if (isDialogShowing || isFinishing()) return;
+        isDialogShowing = true;
+
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("IZIN KELUAR UJIAN");
         builder.setMessage("Masukkan password pengawas untuk keluar dari aplikasi:");
@@ -201,6 +220,7 @@ public class ExamActivity extends AppCompatActivity {
         builder.setView(inputPass);
 
         builder.setPositiveButton("KELUAR", (dialog, which) -> {
+            isDialogShowing = false;
             String pass = inputPass.getText().toString().trim();
             if ("xyz".equals(pass)) {
                 isAuthorizedExit = true;
@@ -211,65 +231,70 @@ public class ExamActivity extends AppCompatActivity {
                     }
                 }
                 finishAffinity();
-                System.exit(0);
             } else {
                 bunyikanAlarmPeringatan();
                 Toast.makeText(this, "PASSWORD SALAH! Akses keluar ditolak.", Toast.LENGTH_LONG).show();
             }
         });
 
-        builder.setNegativeButton("LANJUT UJIAN", (dialog, which) -> dialog.dismiss());
+        builder.setNegativeButton("LANJUT UJIAN", (dialog, which) -> {
+            isDialogShowing = false;
+            dialog.dismiss();
+        });
+
+        builder.setOnDismissListener(dialog -> isDialogShowing = false);
         builder.show();
     }
 
     private void updateNetworkStatus() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo activeNetwork = cm != null ? cm.getActiveNetworkInfo() : null;
-        boolean isConnected = activeNetwork != null && activeNetwork.isConnectedOrConnecting();
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo activeNetwork = cm != null ? cm.getActiveNetworkInfo() : null;
+            boolean isConnected = activeNetwork != null && activeNetwork.isConnectedOrConnecting();
 
-        if (isConnected) {
-            txtNetwork.setText("NET: ONLINE");
-            txtNetwork.setTextColor(Color.parseColor("#A5D6A7"));
-        } else {
-            txtNetwork.setText("NET: OFFLINE");
-            txtNetwork.setTextColor(Color.parseColor("#FFCDD2"));
+            if (isConnected) {
+                txtNetwork.setText("NET: ONLINE");
+                txtNetwork.setTextColor(Color.parseColor("#A5D6A7"));
+            } else {
+                txtNetwork.setText("NET: OFFLINE");
+                txtNetwork.setTextColor(Color.parseColor("#FFCDD2"));
+            }
+        } catch (Exception ignored) {
         }
     }
 
-    // DETEKSI JIKA SISWA MENEKAN TOMBOL HP (BACK, VOLUME, POWER, RECENT)
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (!isAuthorizedExit) {
             bunyikanAlarmPeringatan();
             Toast.makeText(this, "Dilarang menekan tombol perangkat saat ujian!", Toast.LENGTH_SHORT).show();
-            return true; // Blokir fungsi tombol
+            return true;
         }
         return super.onKeyDown(keyCode, event);
     }
 
     @Override
     public void onBackPressed() {
-        // Bunyikan suara & minta password jika tombol Back ditekan
         bunyikanAlarmPeringatan();
         tampilkanDialogKeluar();
     }
 
-    // DETEKSI ANTI FLOATING APPS & NOTIFIKASI PANEL
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (!hasFocus && !isAuthorizedExit) {
-            // Terpanggil jika siswa menarik status bar atau membuka floating app
+        // Abaikan jika kehilangan fokus karena dialog password sendiri yang sedang terbuka
+        if (!hasFocus && !isAuthorizedExit && !isDialogShowing) {
             bunyikanAlarmPeringatan();
-            // Paksa tarik kembali aplikasi ke depan
-            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-            if (am != null) {
-                am.moveTaskToFront(getTaskId(), 0);
+            try {
+                ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+                if (am != null) {
+                    am.moveTaskToFront(getTaskId(), 0);
+                }
+            } catch (Exception ignored) {
             }
         }
     }
 
-    // DETEKSI JIKA SISWA MENEKAN TOMBOL HOME / PINDAH APLIKASI
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
@@ -282,10 +307,13 @@ public class ExamActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         maksimalkanVolume();
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(Intent.ACTION_BATTERY_CHANGED);
-        filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
-        registerReceiver(systemStatusReceiver, filter);
+        try {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(Intent.ACTION_BATTERY_CHANGED);
+            filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+            registerReceiver(systemStatusReceiver, filter);
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
@@ -295,12 +323,33 @@ public class ExamActivity extends AppCompatActivity {
             unregisterReceiver(systemStatusReceiver);
         } catch (Exception ignored) {
         }
-        if (!isAuthorizedExit) {
+
+        // Tarik kembali aplikasi dengan jeda aman (tidak memicu infinite loop)
+        if (!isAuthorizedExit && !isDialogShowing) {
             bunyikanAlarmPeringatan();
-            // Kembalikan layar ujian ke depan secara paksa
-            Intent intent = new Intent(this, ExamActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-            startActivity(intent);
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                if (!isAuthorizedExit && !isFinishing()) {
+                    try {
+                        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+                        if (am != null) {
+                            am.moveTaskToFront(getTaskId(), 0);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }, 300);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (toneGen != null) {
+            try {
+                toneGen.release();
+            } catch (Exception ignored) {
+            }
+            toneGen = null;
         }
     }
 }
