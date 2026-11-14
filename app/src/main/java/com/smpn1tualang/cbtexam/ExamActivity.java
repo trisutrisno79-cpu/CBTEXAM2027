@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
@@ -29,6 +30,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -44,10 +46,22 @@ public class ExamActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private TextView txtBattery;
     private ImageView iconBattery, iconNetwork;
+    private LinearLayout overlayBlocker;
     private ToneGenerator toneGen;
     private boolean isAuthorizedExit = false;
     private boolean isDialogShowing = false;
     private int currentZoom = 100;
+
+    private final Handler securityHandler = new Handler(Looper.getMainLooper());
+    private final Runnable securityMonitorRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!isAuthorizedExit && !isFinishing()) {
+                cekKeamananLayar();
+                securityHandler.postDelayed(this, 500);
+            }
+        }
+    };
 
     private final BroadcastReceiver systemStatusReceiver = new BroadcastReceiver() {
         @Override
@@ -98,6 +112,7 @@ public class ExamActivity extends AppCompatActivity {
         txtBattery = findViewById(R.id.txtBattery);
         iconBattery = findViewById(R.id.iconBattery);
         iconNetwork = findViewById(R.id.iconNetwork);
+        overlayBlocker = findViewById(R.id.overlayBlocker);
         ImageButton btnRefresh = findViewById(R.id.btnRefresh);
         Button btnExit = findViewById(R.id.btnExit);
         FloatingActionButton btnZoomIn = findViewById(R.id.btnZoomIn);
@@ -142,6 +157,56 @@ public class ExamActivity extends AppCompatActivity {
         }
     }
 
+    private void cekKeamananLayar() {
+        boolean isFloatingOrSplit = false;
+
+        // 1. Cek apakah masuk mode Multi-Window / Split Screen / Freeform Floating
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            if (isInMultiWindowMode() || isInPictureInPictureMode()) {
+                isFloatingOrSplit = true;
+            }
+        }
+
+        // 2. Cek apakah jendela kehilangan fokus karena Floating App atau Panel Notifikasi
+        if (!hasWindowFocus() && !isDialogShowing) {
+            isFloatingOrSplit = true;
+        }
+
+        if (isFloatingOrSplit) {
+            // Tutup panel notifikasi jika ditarik
+            try {
+                sendBroadcast(new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS));
+            } catch (Exception ignored) {
+            }
+
+            // Tampilkan layar blokir merah & bunyikan alarm
+            overlayBlocker.setVisibility(View.VISIBLE);
+            bunyikanAlarmPeringatan();
+
+            // Paksa tarik aplikasi ujian kembali ke lapisan paling depan
+            try {
+                ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+                if (am != null) {
+                    am.moveTaskToFront(getTaskId(), ActivityManager.MOVE_TASK_WITH_HOME);
+                }
+            } catch (Exception ignored) {
+            }
+        } else {
+            if (overlayBlocker.getVisibility() == View.VISIBLE) {
+                overlayBlocker.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    @Override
+    public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
+        if (isInMultiWindowMode && !isAuthorizedExit) {
+            overlayBlocker.setVisibility(View.VISIBLE);
+            bunyikanAlarmPeringatan();
+        }
+    }
+
     private void konfigurasiWebView() {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -157,7 +222,7 @@ public class ExamActivity extends AppCompatActivity {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
 
-        // User-Agent khusus sesuai permintaan
+        // User-Agent khusus
         settings.setUserAgentString("10403445@");
 
         // Anti Copy-Paste
@@ -207,7 +272,7 @@ public class ExamActivity extends AppCompatActivity {
         try {
             maksimalkanVolume();
             if (toneGen != null) {
-                toneGen.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 1000);
+                toneGen.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 800);
             }
         } catch (Exception ignored) {
         }
@@ -219,7 +284,7 @@ public class ExamActivity extends AppCompatActivity {
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("IZIN KELUAR UJIAN");
-        builder.setMessage("Masukkan password pengawas untuk keluar dari aplikasi:");
+        builder.setMessage("Masukkan Password Untuk Keluar Aplikasi :");
         builder.setCancelable(false);
 
         final EditText inputPass = new EditText(this);
@@ -232,6 +297,7 @@ public class ExamActivity extends AppCompatActivity {
             String pass = inputPass.getText().toString().trim();
             if ("xyz".equals(pass)) {
                 isAuthorizedExit = true;
+                securityHandler.removeCallbacks(securityMonitorRunnable);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     try {
                         stopLockTask();
@@ -261,11 +327,9 @@ public class ExamActivity extends AppCompatActivity {
             boolean isConnected = activeNetwork != null && activeNetwork.isConnectedOrConnecting();
 
             if (isConnected) {
-                iconNetwork.setImageResource(android.R.drawable.presence_online);
-                ImageViewCompat.setImageTintList(iconNetwork, ColorStateList.valueOf(Color.parseColor("#69F0AE")));
+                iconNetwork.setImageResource(R.drawable.ic_network_online);
             } else {
-                iconNetwork.setImageResource(android.R.drawable.presence_offline);
-                ImageViewCompat.setImageTintList(iconNetwork, ColorStateList.valueOf(Color.parseColor("#FF5252")));
+                iconNetwork.setImageResource(R.drawable.ic_network_offline);
             }
         } catch (Exception ignored) {
         }
@@ -290,16 +354,7 @@ public class ExamActivity extends AppCompatActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (!hasFocus && !isAuthorizedExit && !isDialogShowing) {
-            bunyikanAlarmPeringatan();
-            try {
-                ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-                if (am != null) {
-                    am.moveTaskToFront(getTaskId(), 0);
-                }
-            } catch (Exception ignored) {
-            }
-        }
+        cekKeamananLayar();
     }
 
     @Override
@@ -314,6 +369,8 @@ public class ExamActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         maksimalkanVolume();
+        updateNetworkStatus();
+        securityHandler.post(securityMonitorRunnable);
         try {
             IntentFilter filter = new IntentFilter();
             filter.addAction(Intent.ACTION_BATTERY_CHANGED);
@@ -326,6 +383,7 @@ public class ExamActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        securityHandler.removeCallbacks(securityMonitorRunnable);
         try {
             unregisterReceiver(systemStatusReceiver);
         } catch (Exception ignored) {
@@ -338,7 +396,7 @@ public class ExamActivity extends AppCompatActivity {
                     try {
                         ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
                         if (am != null) {
-                            am.moveTaskToFront(getTaskId(), 0);
+                            am.moveTaskToFront(getTaskId(), ActivityManager.MOVE_TASK_WITH_HOME);
                         }
                     } catch (Exception ignored) {
                     }
@@ -350,6 +408,7 @@ public class ExamActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        securityHandler.removeCallbacks(securityMonitorRunnable);
         if (toneGen != null) {
             try {
                 toneGen.release();
