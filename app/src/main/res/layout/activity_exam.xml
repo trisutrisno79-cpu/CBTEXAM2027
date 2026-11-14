@@ -5,7 +5,7 @@
     android:layout_height="match_parent"
     android:background="@color/white">
 
-    <!-- Bar Atas: Indikator Kiri & Kontrol Kanan -->
+    <!-- Bar Atas: Indikator Logo (Kiri) & Kontrol (Kanan) -->
     <RelativeLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -13,7 +13,7 @@
         android:background="@color/primary"
         android:paddingHorizontal="10dp">
 
-        <!-- Kiri: Jam, Baterai, Jaringan -->
+        <!-- Kiri: Logo Jam, Logo Baterai, Logo Jaringan -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
@@ -21,12 +21,22 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
+            <!-- 1. Logo & Indikator Jam -->
+            <ImageView
+                android:id="@+id/iconClock"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginEnd="4dp"
+                android:contentDescription="Jam"
+                android:src="@android:drawable/ic_menu_recent_history"
+                app:tint="@color/white" />
+
             <TextClock
                 android:id="@+id/txtClock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:format12Hour="HH:mm:ss"
-                android:format24Hour="HH:mm:ss"
+                android:format12Hour="HH:mm"
+                android:format24Hour="HH:mm"
                 android:textColor="@color/white"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -36,13 +46,23 @@
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="6dp"
                 android:text="|"
-                android:textColor="#80FFFFFF" />
+                android:textColor="#60FFFFFF" />
+
+            <!-- 2. Logo & Persentase Baterai -->
+            <ImageView
+                android:id="@+id/iconBattery"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginEnd="3dp"
+                android:contentDescription="Baterai"
+                android:src="@android:drawable/ic_lock_idle_charging"
+                app:tint="#A5D6A7" />
 
             <TextView
                 android:id="@+id/txtBattery"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="BAT: 100%"
+                android:text="100%"
                 android:textColor="@color/white"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -52,16 +72,16 @@
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="6dp"
                 android:text="|"
-                android:textColor="#80FFFFFF" />
+                android:textColor="#60FFFFFF" />
 
-            <TextView
-                android:id="@+id/txtNetwork"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="NET: ONLINE"
-                android:textColor="#A5D6A7"
-                android:textSize="12sp"
-                android:textStyle="bold" />
+            <!-- 3. Logo Indikator Jaringan (Hijau = Online, Merah = Offline) -->
+            <ImageView
+                android:id="@+id/iconNetwork"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:contentDescription="Status Jaringan"
+                android:src="@android:drawable/presence_online"
+                app:tint="#69F0AE" />
         </LinearLayout>
 
         <!-- Kanan: Tombol Refresh & Keluar -->
