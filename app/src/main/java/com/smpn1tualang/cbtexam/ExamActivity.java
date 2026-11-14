@@ -1,14 +1,22 @@
 package com.smpn1tualang.cbtexam;
 
+import android.Manifest;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.SurfaceTexture;
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraDevice;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureRequest;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.net.ConnectivityManager;
@@ -20,6 +28,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.KeyEvent;
+import android.view.Surface;
+import android.view.TextureView;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
@@ -35,10 +45,15 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 import androidx.core.widget.ImageViewCompat;
 
+import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+
+import java.util.Collections;
 
 public class ExamActivity extends AppCompatActivity {
 
@@ -47,6 +62,11 @@ public class ExamActivity extends AppCompatActivity {
     private TextView txtBattery;
     private ImageView iconBattery, iconNetwork;
     private LinearLayout overlayBlocker;
+    private MaterialCardView cardFrontCamera;
+    private TextureView textureFrontCamera;
+
+    private CameraDevice cameraDevice;
+    private CameraCaptureSession cameraCaptureSession;
     private ToneGenerator toneGen;
     private boolean isAuthorizedExit = false;
     private boolean isDialogShowing = false;
@@ -113,6 +133,8 @@ public class ExamActivity extends AppCompatActivity {
         iconBattery = findViewById(R.id.iconBattery);
         iconNetwork = findViewById(R.id.iconNetwork);
         overlayBlocker = findViewById(R.id.overlayBlocker);
+        cardFrontCamera = findViewById(R.id.cardFrontCamera);
+        textureFrontCamera = findViewById(R.id.textureFrontCamera);
         ImageButton btnRefresh = findViewById(R.id.btnRefresh);
         Button btnExit = findViewById(R.id.btnExit);
         FloatingActionButton btnZoomIn = findViewById(R.id.btnZoomIn);
@@ -120,6 +142,7 @@ public class ExamActivity extends AppCompatActivity {
 
         konfigurasiWebView();
         updateNetworkStatus();
+        siapkanKameraDepan();
 
         String examUrl = getIntent().getStringExtra("EXAM_URL");
         if (examUrl != null && !examUrl.isEmpty()) {
@@ -157,33 +180,154 @@ public class ExamActivity extends AppCompatActivity {
         }
     }
 
+    // --- KONTROL KAMERA DEPAN PENGAWAS ---
+    private void siapkanKameraDepan() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            cardFrontCamera.setVisibility(View.GONE);
+            return;
+        }
+
+        textureFrontCamera.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+            @Override
+            public void onSurfaceTextureAvailable(@NonNull SurfaceTexture surface, int width, int height) {
+                bukaKameraDepan();
+            }
+
+            @Override
+            public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {
+            }
+
+            @Override
+            public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture surface) {
+                tutupKameraDepan();
+                return true;
+            }
+
+            @Override
+            public void onSurfaceTextureUpdated(@NonNull SurfaceTexture surface) {
+            }
+        });
+    }
+
+    private void bukaKameraDepan() {
+        try {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                    != PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+            CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+            if (manager == null) return;
+
+            String frontCameraId = null;
+            for (String cameraId : manager.getCameraIdList()) {
+                CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
+                Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                if (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                    frontCameraId = cameraId;
+                    break;
+                }
+            }
+
+            if (frontCameraId == null) {
+                cardFrontCamera.setVisibility(View.GONE);
+                return;
+            }
+
+            manager.openCamera(frontCameraId, new CameraDevice.StateCallback() {
+                @Override
+                public void onOpened(@NonNull CameraDevice camera) {
+                    cameraDevice = camera;
+                    mulaiPreviewKamera();
+                }
+
+                @Override
+                public void onDisconnected(@NonNull CameraDevice camera) {
+                    tutupKameraDepan();
+                }
+
+                @Override
+                public void onError(@NonNull CameraDevice camera, int error) {
+                    tutupKameraDepan();
+                }
+            }, securityHandler);
+        } catch (Exception e) {
+            cardFrontCamera.setVisibility(View.GONE);
+        }
+    }
+
+    private void mulaiPreviewKamera() {
+        try {
+            if (cameraDevice == null || !textureFrontCamera.isAvailable()) return;
+            SurfaceTexture texture = textureFrontCamera.getSurfaceTexture();
+            if (texture == null) return;
+
+            texture.setDefaultBufferSize(320, 240); // Resolusi ringan agar hemat RAM & baterai
+            Surface surface = new Surface(texture);
+
+            final CaptureRequest.Builder previewRequestBuilder =
+                    cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            previewRequestBuilder.addTarget(surface);
+
+            cameraDevice.createCaptureSession(Collections.singletonList(surface),
+                    new CameraCaptureSession.StateCallback() {
+                        @Override
+                        public void onConfigured(@NonNull CameraCaptureSession session) {
+                            if (cameraDevice == null) return;
+                            cameraCaptureSession = session;
+                            try {
+                                previewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                                cameraCaptureSession.setRepeatingRequest(previewRequestBuilder.build(), null, securityHandler);
+                            } catch (Exception ignored) {
+                            }
+                        }
+
+                        @Override
+                        public void onConfigureFailed(@NonNull CameraCaptureSession session) {
+                        }
+                    }, securityHandler);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void tutupKameraDepan() {
+        try {
+            if (cameraCaptureSession != null) {
+                cameraCaptureSession.close();
+                cameraCaptureSession = null;
+            }
+            if (cameraDevice != null) {
+                cameraDevice.close();
+                cameraDevice = null;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    // --- KEAMANAN ANTI FLOATING & ANTI SPLIT SCREEN ---
     private void cekKeamananLayar() {
         boolean isFloatingOrSplit = false;
 
-        // 1. Cek apakah masuk mode Multi-Window / Split Screen / Freeform Floating
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             if (isInMultiWindowMode() || isInPictureInPictureMode()) {
                 isFloatingOrSplit = true;
             }
         }
 
-        // 2. Cek apakah jendela kehilangan fokus karena Floating App atau Panel Notifikasi
         if (!hasWindowFocus() && !isDialogShowing) {
             isFloatingOrSplit = true;
         }
 
         if (isFloatingOrSplit) {
-            // Tutup panel notifikasi jika ditarik
             try {
                 sendBroadcast(new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS));
             } catch (Exception ignored) {
             }
 
-            // Tampilkan layar blokir merah & bunyikan alarm
             overlayBlocker.setVisibility(View.VISIBLE);
             bunyikanAlarmPeringatan();
 
-            // Paksa tarik aplikasi ujian kembali ke lapisan paling depan
             try {
                 ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
                 if (am != null) {
@@ -222,10 +366,8 @@ public class ExamActivity extends AppCompatActivity {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
 
-        // User-Agent khusus
         settings.setUserAgentString("10403445@");
 
-        // Anti Copy-Paste
         webView.setLongClickable(false);
         webView.setOnLongClickListener(v -> true);
         webView.setHapticFeedbackEnabled(false);
@@ -284,7 +426,7 @@ public class ExamActivity extends AppCompatActivity {
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("IZIN KELUAR UJIAN");
-        builder.setMessage("Masukkan Password Untuk Keluar Aplikasi :");
+        builder.setMessage("Masukkan password pengawas untuk keluar dari aplikasi:");
         builder.setCancelable(false);
 
         final EditText inputPass = new EditText(this);
@@ -297,6 +439,7 @@ public class ExamActivity extends AppCompatActivity {
             String pass = inputPass.getText().toString().trim();
             if ("xyz".equals(pass)) {
                 isAuthorizedExit = true;
+                tutupKameraDepan();
                 securityHandler.removeCallbacks(securityMonitorRunnable);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     try {
@@ -371,6 +514,9 @@ public class ExamActivity extends AppCompatActivity {
         maksimalkanVolume();
         updateNetworkStatus();
         securityHandler.post(securityMonitorRunnable);
+        if (textureFrontCamera.isAvailable() && cameraDevice == null) {
+            bukaKameraDepan();
+        }
         try {
             IntentFilter filter = new IntentFilter();
             filter.addAction(Intent.ACTION_BATTERY_CHANGED);
@@ -383,6 +529,7 @@ public class ExamActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        tutupKameraDepan();
         securityHandler.removeCallbacks(securityMonitorRunnable);
         try {
             unregisterReceiver(systemStatusReceiver);
@@ -408,6 +555,7 @@ public class ExamActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        tutupKameraDepan();
         securityHandler.removeCallbacks(securityMonitorRunnable);
         if (toneGen != null) {
             try {
